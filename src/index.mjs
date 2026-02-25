@@ -53,7 +53,7 @@ class LarkMCPWrapper {
 
       try {
         // 判断是官方工具还是自定义工具
-        if (name.startsWith("task.")) {
+        if (name.startsWith("task_")) {
           // 自定义任务工具
           return await this.handleTaskTool(name, args);
         } else {
