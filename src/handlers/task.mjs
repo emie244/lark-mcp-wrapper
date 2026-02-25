@@ -97,6 +97,13 @@ export async function createTask(args) {
     follower_ids: [],
     collaborator_ids: [],
     repeat_rule: "",
+    origin: {
+      platform_i18n_name: JSON.stringify({ zh_cn: "Lark MCP", en_us: "Lark MCP" }),
+      href: {
+        url: "https://github.com/emie244/lark-mcp-wrapper",
+        title: "Lark MCP Wrapper"
+      }
+    }
   };
 
   // 添加截止时间
