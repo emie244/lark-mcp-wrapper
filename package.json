@@ -1,0 +1,26 @@
+{
+  "name": "lark-mcp-wrapper",
+  "version": "1.0.0",
+  "description": "飞书 MCP 包装层 - 官方工具 + 自定义任务工具",
+  "type": "module",
+  "main": "src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "dev": "node --watch src/index.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "axios": "^1.7.9",
+    "crypto-js": "^4.2.0",
+    "zod": "^3.24.1"
+  },
+  "keywords": [
+    "mcp",
+    "feishu",
+    "lark",
+    "task",
+    "todo"
+  ],
+  "author": "",
+  "license": "MIT"
+}

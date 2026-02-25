@@ -1,0 +1,213 @@
+/**
+ * 任务工具处理函数
+ * 调用飞书任务 API
+ */
+
+import axios from "axios";
+import { config } from "../../config/index.mjs";
+
+// 获取 Tenant Access Token
+async function getTenantAccessToken() {
+  const response = await axios.post(
+    `${config.larkDomain}/open-apis/auth/v3/tenant_access_token/internal`,
+    {
+      app_id: config.appId,
+      app_secret: config.appSecret,
+    }
+  );
+
+  if (response.data.code !== 0) {
+    throw new Error(`Failed to get token: ${response.data.msg}`);
+  }
+
+  return response.data.tenant_access_token;
+}
+
+// 飞书 API 请求封装
+async function feishuRequest(method, endpoint, data = null) {
+  const token = await getTenantAccessToken();
+  const url = `${config.larkDomain}/open-apis${endpoint}`;
+
+  const response = await axios({
+    method,
+    url,
+    data,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (response.data.code !== 0) {
+    throw new Error(`API error: ${response.data.msg}`);
+  }
+
+  return response.data.data;
+}
+
+// 创建任务
+export async function createTask(args) {
+  const { summary, description, due, members, tasklist_id, is_milestone } = args;
+
+  const taskData = {
+    summary,
+    description,
+    is_milestone: is_milestone || false,
+  };
+
+  if (due) {
+    taskData.due = due;
+  }
+
+  if (members && members.length > 0) {
+    taskData.members = members;
+  }
+
+  // 如果有任务清单ID，添加到 tasklists
+  if (tasklist_id || config.taskConfig.defaultTasklistId) {
+    taskData.tasklists = [
+      {
+        tasklist_guid: tasklist_id || config.taskConfig.defaultTasklistId,
+      },
+    ];
+  }
+
+  const result = await feishuRequest(
+    "POST",
+    "/open-apis/task/v2/task",
+    { data: taskData }
+  );
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: `任务创建成功！\n任务GUID: ${result.task?.guid}\n标题: ${summary}`,
+      },
+    ],
+  };
+}
+
+// 获取任务列表
+export async function listTasks(args) {
+  const { tasklist_id, page_size = 50, page_token, completed } = args;
+
+  let endpoint = `/open-apis/task/v2/task?page_size=${page_size}`;
+
+  if (page_token) {
+    endpoint += `&page_token=${page_token}`;
+  }
+
+  // 如果指定了任务清单
+  if (tasklist_id) {
+    endpoint += `&tasklist_guid=${tasklist_id}`;
+  }
+
+  const result = await feishuRequest("GET", endpoint);
+
+  let tasks = result.items || [];
+
+  // 按完成状态过滤
+  if (completed !== undefined) {
+    tasks = tasks.filter(
+      (task) =>
+        completed ? task.completed_at !== null : task.completed_at === null
+    );
+  }
+
+  const taskList = tasks
+    .map(
+      (task) =>
+        `- ${task.summary} ${task.completed_at ? "✅" : "⏳"} (${task.guid})`
+    )
+    .join("\n");
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: `任务列表（共 ${tasks.length} 条）：\n${taskList}`,
+      },
+    ],
+  };
+}
+
+// 获取单个任务详情
+export async function getTask(args) {
+  const { task_guid } = args;
+
+  const result = await feishuRequest(
+    "GET",
+    `/open-apis/task/v2/task/${task_guid}`
+  );
+
+  const task = result.task;
+
+  const details = [
+    `标题: ${task.summary}`,
+    `描述: ${task.description || "无"}`,
+    `状态: ${task.completed_at ? "已完成 ✅" : "进行中 ⏳"}`,
+    `创建时间: ${new Date(parseInt(task.created_at)).toLocaleString()}`,
+    task.due?.timestamp
+      ? `截止时间: ${new Date(parseInt(task.due.timestamp)).toLocaleString()}`
+      : "截止时间: 无",
+    task.completed_at
+      ? `完成时间: ${new Date(parseInt(task.completed_at)).toLocaleString()}`
+      : "",
+    `GUID: ${task.guid}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: details,
+      },
+    ],
+  };
+}
+
+// 更新任务
+export async function updateTask(args) {
+  const { task_guid, summary, description, due, completed_at } = args;
+
+  const updateData = {};
+
+  if (summary !== undefined) updateData.summary = summary;
+  if (description !== undefined) updateData.description = description;
+  if (due !== undefined) updateData.due = due;
+  if (completed_at !== undefined) updateData.completed_at = completed_at;
+
+  const result = await feishuRequest(
+    "PATCH",
+    `/open-apis/task/v2/task/${task_guid}`,
+    { data: updateData }
+  );
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: `任务更新成功！\nGUID: ${task_guid}`,
+      },
+    ],
+  };
+}
+
+// 删除任务
+export async function deleteTask(args) {
+  const { task_guid } = args;
+
+  await feishuRequest("DELETE", `/open-apis/task/v2/task/${task_guid}`);
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: `任务删除成功！\nGUID: ${task_guid}`,
+      },
+    ],
+  };
+}
