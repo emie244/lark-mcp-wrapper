@@ -90,27 +90,35 @@ async function feishuRequest(method, endpoint, data = null) {
 export async function createTask(args) {
   const { summary, description, due, members, tasklist_id, is_milestone, useUAT, user_id } = args;
 
+  // 构建任务数据
   const taskData = {
     summary,
     description: description || "",
-    is_milestone: is_milestone || false,
+    follower_ids: [],
+    collaborator_ids: [],
+    repeat_rule: "",
   };
 
-  if (due) {
-    taskData.due = due;
+  // 添加截止时间
+  if (due?.timestamp) {
+    taskData.due = {
+      time: String(Math.floor(parseInt(due.timestamp) / 1000)), // 毫秒转秒
+      timezone: "Asia/Shanghai",
+      is_all_day: due.is_all_day || false,
+    };
   }
 
+  // 添加成员
   if (members && members.length > 0) {
-    taskData.members = members;
-  }
-
-  // 如果有任务清单ID，添加到 tasklists
-  if (tasklist_id || config.taskConfig.defaultTasklistId) {
-    taskData.tasklists = [
-      {
-        tasklist_guid: tasklist_id || config.taskConfig.defaultTasklistId,
-      },
-    ];
+    const collaboratorIds = members
+      .filter(m => m.role === "assignee")
+      .map(m => m.id);
+    const followerIds = members
+      .filter(m => m.role === "follower")
+      .map(m => m.id);
+    
+    taskData.collaborator_ids = collaboratorIds;
+    taskData.follower_ids = followerIds;
   }
 
   try {
@@ -124,40 +132,43 @@ export async function createTask(args) {
       token = await getTenantAccessToken();
     }
 
+    console.error("[Create Task] Request:", JSON.stringify(taskData, null, 2));
+
     const response = await axios({
       method: "POST",
-      url: `${config.larkDomain}/open-apis/task/v2/task`,
-      data: { data: taskData },
+      url: `${config.larkDomain}/open-apis/task/v1/tasks?user_id_type=open_id`,
+      data: taskData,
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
     });
 
+    console.error("[Create Task] Response:", JSON.stringify(response.data, null, 2));
+
     if (response.data.code !== 0) {
-      console.error("Task API error:", response.data);
-      throw new Error(response.data.msg || "Unknown error");
+      throw new Error(response.data.msg || `Error code: ${response.data.code}`);
     }
 
     return {
       content: [
         {
           type: "text",
-          text: `任务创建成功！\n任务GUID: ${response.data.data?.task?.guid}\n标题: ${summary}`,
+          text: `✅ 任务创建成功！\n\n任务ID: ${response.data.data?.task?.id}\n标题: ${summary}`,
         },
       ],
     };
   } catch (error) {
-    console.error("Create task error:", error.message);
+    console.error("[Create Task Error]:", error.message);
     if (error.response) {
-      console.error("Response status:", error.response.status);
-      console.error("Response data:", JSON.stringify(error.response.data));
+      console.error("Status:", error.response.status);
+      console.error("Data:", JSON.stringify(error.response.data, null, 2));
     }
     return {
       content: [
         {
           type: "text",
-          text: `创建任务失败: ${error.message}\n\n请检查:\n1. 飞书应用是否已发布\n2. 是否已开启任务功能权限\n3. 企业是否已启用飞书任务功能`,
+          text: `❌ 创建任务失败: ${error.message}\n\n请检查:\n1. 飞书应用是否已发布\n2. 是否已开启任务功能权限\n3. 企业是否已启用飞书任务功能`,
         },
       ],
       isError: true,
