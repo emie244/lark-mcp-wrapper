@@ -23,6 +23,34 @@ async function getTenantAccessToken() {
   return response.data.tenant_access_token;
 }
 
+// 获取 User Access Token (通过 tenant_access_token 换取)
+async function getUserAccessToken(tenantToken, userId) {
+  try {
+    const response = await axios.post(
+      `${config.larkDomain}/open-apis/auth/v3/user_access_token`,
+      {
+        user_id: userId,
+        user_id_type: "open_id",
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${tenantToken}`,
+        },
+      }
+    );
+
+    if (response.data.code !== 0) {
+      console.error("Failed to get user token:", response.data.msg);
+      return null;
+    }
+
+    return response.data.data.access_token;
+  } catch (error) {
+    console.error("Error getting user token:", error.message);
+    return null;
+  }
+}
+
 // 飞书 API 请求封装
 async function feishuRequest(method, endpoint, data = null) {
   const token = await getTenantAccessToken();
@@ -60,7 +88,7 @@ async function feishuRequest(method, endpoint, data = null) {
 
 // 创建任务
 export async function createTask(args) {
-  const { summary, description, due, members, tasklist_id, is_milestone } = args;
+  const { summary, description, due, members, tasklist_id, is_milestone, useUAT, user_id } = args;
 
   const taskData = {
     summary,
@@ -86,17 +114,36 @@ export async function createTask(args) {
   }
 
   try {
-    const result = await feishuRequest(
-      "POST",
-      "/task/v2/task",
-      { data: taskData }
-    );
+    // 获取 token
+    let token;
+    if (useUAT && user_id) {
+      const tenantToken = await getTenantAccessToken();
+      const userToken = await getUserAccessToken(tenantToken, user_id);
+      token = userToken || tenantToken;
+    } else {
+      token = await getTenantAccessToken();
+    }
+
+    const response = await axios({
+      method: "POST",
+      url: `${config.larkDomain}/open-apis/task/v2/task`,
+      data: { data: taskData },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (response.data.code !== 0) {
+      console.error("Task API error:", response.data);
+      throw new Error(response.data.msg || "Unknown error");
+    }
 
     return {
       content: [
         {
           type: "text",
-          text: `任务创建成功！\n任务GUID: ${result.task?.guid}\n标题: ${summary}`,
+          text: `任务创建成功！\n任务GUID: ${response.data.data?.task?.guid}\n标题: ${summary}`,
         },
       ],
     };
