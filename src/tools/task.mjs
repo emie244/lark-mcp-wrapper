@@ -55,13 +55,9 @@ export const taskTools = [
           type: "boolean",
           description: "是否为里程碑",
         },
-        useUAT: {
-          type: "boolean",
-          description: "是否使用用户权限（User Access Token）",
-        },
         user_id: {
           type: "string",
-          description: "用户ID（使用用户权限时需要，open_id）",
+          description: "用户ID（open_id），提供后将使用用户权限创建任务，任务会显示在用户任务中心",
         },
       },
       required: ["summary"],

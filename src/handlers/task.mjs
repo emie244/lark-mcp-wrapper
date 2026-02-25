@@ -88,7 +88,7 @@ async function feishuRequest(method, endpoint, data = null) {
 
 // 创建任务
 export async function createTask(args) {
-  const { summary, description, due, members, tasklist_id, is_milestone, useUAT, user_id } = args;
+  const { summary, description, due, members, tasklist_id, is_milestone, user_id } = args;
 
   // 构建任务数据
   const taskData = {
@@ -129,14 +129,24 @@ export async function createTask(args) {
   }
 
   try {
-    // 获取 token
-    let token;
-    if (useUAT && user_id) {
-      const tenantToken = await getTenantAccessToken();
+    // 获取 Tenant Token
+    const tenantToken = await getTenantAccessToken();
+    
+    // 如果有 user_id，尝试获取 User Access Token
+    let token = tenantToken;
+    let tokenType = "tenant";
+    
+    if (user_id) {
       const userToken = await getUserAccessToken(tenantToken, user_id);
-      token = userToken || tenantToken;
+      if (userToken) {
+        token = userToken;
+        tokenType = "user";
+        console.error(`[Create Task] Using USER access token for user: ${user_id}`);
+      } else {
+        console.error(`[Create Task] Failed to get user token, falling back to tenant token`);
+      }
     } else {
-      token = await getTenantAccessToken();
+      console.error(`[Create Task] No user_id provided, using TENANT access token`);
     }
 
     console.error("[Create Task] Request:", JSON.stringify(taskData, null, 2));
@@ -157,11 +167,14 @@ export async function createTask(args) {
       throw new Error(response.data.msg || `Error code: ${response.data.code}`);
     }
 
+    const taskSource = response.data.data?.task?.source;
+    const sourceText = taskSource === 7 ? "用户任务 (User Token)" : "应用任务 (Tenant Token)";
+
     return {
       content: [
         {
           type: "text",
-          text: `✅ 任务创建成功！\n\n任务ID: ${response.data.data?.task?.id}\n标题: ${summary}`,
+          text: `✅ 任务创建成功！\n\n任务ID: ${response.data.data?.task?.id}\n标题: ${summary}\n来源: ${sourceText}\n创建者: ${response.data.data?.task?.creator_id}`,
         },
       ],
     };
@@ -175,7 +188,7 @@ export async function createTask(args) {
       content: [
         {
           type: "text",
-          text: `❌ 创建任务失败: ${error.message}\n\n请检查:\n1. 飞书应用是否已发布\n2. 是否已开启任务功能权限\n3. 企业是否已启用飞书任务功能`,
+          text: `❌ 创建任务失败: ${error.message}\n\n请检查:\n1. 飞书应用是否已发布\n2. 是否已开启任务功能权限\n3. 用户是否已授权应用访问任务`,
         },
       ],
       isError: true,
