@@ -26,23 +26,36 @@ async function getTenantAccessToken() {
 // 飞书 API 请求封装
 async function feishuRequest(method, endpoint, data = null) {
   const token = await getTenantAccessToken();
-  const url = `${config.larkDomain}/open-apis${endpoint}`;
+  // endpoint 应该不带 /open-apis 前缀
+  const cleanEndpoint = endpoint.startsWith('/open-apis') ? endpoint : `/open-apis${endpoint}`;
+  const url = `${config.larkDomain}${cleanEndpoint}`;
+  
+  console.error(`[API Request] ${method} ${url}`);
 
-  const response = await axios({
-    method,
-    url,
-    data,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
+  try {
+    const response = await axios({
+      method,
+      url,
+      data,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
 
-  if (response.data.code !== 0) {
-    throw new Error(`API error: ${response.data.msg}`);
+    if (response.data.code !== 0) {
+      console.error(`[API Error] ${response.data.code}: ${response.data.msg}`);
+      throw new Error(`API error: ${response.data.msg}`);
+    }
+
+    return response.data.data;
+  } catch (error) {
+    if (error.response) {
+      console.error(`[API Error] Status: ${error.response.status}`);
+      console.error(`[API Error] Data:`, error.response.data);
+    }
+    throw error;
   }
-
-  return response.data.data;
 }
 
 // 创建任务
@@ -51,7 +64,7 @@ export async function createTask(args) {
 
   const taskData = {
     summary,
-    description,
+    description: description || "",
     is_milestone: is_milestone || false,
   };
 
@@ -72,20 +85,37 @@ export async function createTask(args) {
     ];
   }
 
-  const result = await feishuRequest(
-    "POST",
-    "/open-apis/task/v2/task",
-    { data: taskData }
-  );
+  try {
+    const result = await feishuRequest(
+      "POST",
+      "/task/v2/task",
+      { data: taskData }
+    );
 
-  return {
-    content: [
-      {
-        type: "text",
-        text: `任务创建成功！\n任务GUID: ${result.task?.guid}\n标题: ${summary}`,
-      },
-    ],
-  };
+    return {
+      content: [
+        {
+          type: "text",
+          text: `任务创建成功！\n任务GUID: ${result.task?.guid}\n标题: ${summary}`,
+        },
+      ],
+    };
+  } catch (error) {
+    console.error("Create task error:", error.message);
+    if (error.response) {
+      console.error("Response status:", error.response.status);
+      console.error("Response data:", JSON.stringify(error.response.data));
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text: `创建任务失败: ${error.message}\n\n请检查:\n1. 飞书应用是否已发布\n2. 是否已开启任务功能权限\n3. 企业是否已启用飞书任务功能`,
+        },
+      ],
+      isError: true,
+    };
+  }
 }
 
 // 获取任务列表
