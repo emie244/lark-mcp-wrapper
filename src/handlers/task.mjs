@@ -189,9 +189,9 @@ export async function createTask(args) {
 
 // 获取任务列表
 export async function listTasks(args) {
-  const { tasklist_id, page_size = 50, page_token, completed } = args;
+  const { tasklist_id, page_size = 50, page_token, completed, user_id } = args;
 
-  let endpoint = `/open-apis/task/v2/task?page_size=${page_size}`;
+  let endpoint = `/open-apis/task/v1/tasks?page_size=${page_size}`;
 
   if (page_token) {
     endpoint += `&page_token=${page_token}`;
@@ -202,70 +202,127 @@ export async function listTasks(args) {
     endpoint += `&tasklist_guid=${tasklist_id}`;
   }
 
-  const result = await feishuRequest("GET", endpoint);
-
-  let tasks = result.items || [];
-
-  // 按完成状态过滤
-  if (completed !== undefined) {
-    tasks = tasks.filter(
-      (task) =>
-        completed ? task.completed_at !== null : task.completed_at === null
-    );
-  }
-
-  const taskList = tasks
-    .map(
-      (task) =>
-        `- ${task.summary} ${task.completed_at ? "✅" : "⏳"} (${task.guid})`
-    )
-    .join("\n");
-
-  return {
-    content: [
-      {
-        type: "text",
-        text: `任务列表（共 ${tasks.length} 条）：\n${taskList}`,
+  try {
+    const token = await getTenantAccessToken();
+    
+    const response = await axios({
+      method: "GET",
+      url: `${config.larkDomain}${endpoint}`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
       },
-    ],
-  };
+    });
+
+    if (response.data.code !== 0) {
+      throw new Error(response.data.msg || `Error code: ${response.data.code}`);
+    }
+
+    let tasks = response.data.data?.items || [];
+
+    // 按完成状态过滤
+    if (completed !== undefined) {
+      tasks = tasks.filter(
+        (task) =>
+          completed ? task.complete_time !== "0" : task.complete_time === "0"
+      );
+    }
+
+    const taskList = tasks
+      .map(
+        (task) =>
+          `- ${task.summary} ${task.complete_time !== "0" ? "✅" : "⏳"} (${task.id})`
+      )
+      .join("\n");
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `任务列表（共 ${tasks.length} 条）：\n${taskList || "暂无任务"}`,
+        },
+      ],
+    };
+  } catch (error) {
+    console.error("[List Tasks Error]:", error.message);
+    if (error.response) {
+      console.error("Status:", error.response.status);
+      console.error("Data:", JSON.stringify(error.response.data, null, 2));
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text: `❌ 获取任务列表失败: ${error.message}`,
+        },
+      ],
+      isError: true,
+    };
+  }
 }
 
 // 获取单个任务详情
 export async function getTask(args) {
   const { task_guid } = args;
 
-  const result = await feishuRequest(
-    "GET",
-    `/open-apis/task/v2/task/${task_guid}`
-  );
+  try {
+    const token = await getTenantAccessToken();
 
-  const task = result.task;
-
-  const details = [
-    `标题: ${task.summary}`,
-    `描述: ${task.description || "无"}`,
-    `状态: ${task.completed_at ? "已完成 ✅" : "进行中 ⏳"}`,
-    `创建时间: ${new Date(parseInt(task.created_at)).toLocaleString()}`,
-    task.due?.timestamp
-      ? `截止时间: ${new Date(parseInt(task.due.timestamp)).toLocaleString()}`
-      : "截止时间: 无",
-    task.completed_at
-      ? `完成时间: ${new Date(parseInt(task.completed_at)).toLocaleString()}`
-      : "",
-    `GUID: ${task.guid}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  return {
-    content: [
-      {
-        type: "text",
-        text: details,
+    const response = await axios({
+      method: "GET",
+      url: `${config.larkDomain}/open-apis/task/v1/tasks/${task_guid}`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
       },
-    ],
-  };
+    });
+
+    if (response.data.code !== 0) {
+      throw new Error(response.data.msg || `Error code: ${response.data.code}`);
+    }
+
+    const task = response.data.data?.task;
+
+    const details = [
+      `标题: ${task.summary}`,
+      `描述: ${task.description || "无"}`,
+      `状态: ${task.complete_time !== "0" ? "已完成 ✅" : "进行中 ⏳"}`,
+      `创建时间: ${new Date(parseInt(task.create_time) * 1000).toLocaleString()}`,
+      task.due?.time && task.due.time !== "0"
+        ? `截止时间: ${new Date(parseInt(task.due.time) * 1000).toLocaleString()}`
+        : "截止时间: 无",
+      task.complete_time !== "0"
+        ? `完成时间: ${new Date(parseInt(task.complete_time) * 1000).toLocaleString()}`
+        : "",
+      `任务ID: ${task.id}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: details,
+        },
+      ],
+    };
+  } catch (error) {
+    console.error("[Get Task Error]:", error.message);
+    if (error.response) {
+      console.error("Status:", error.response.status);
+      console.error("Data:", JSON.stringify(error.response.data, null, 2));
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text: `❌ 获取任务详情失败: ${error.message}`,
+        },
+      ],
+      isError: true,
+    };
+  }
 }
 
 // 更新任务
@@ -279,34 +336,91 @@ export async function updateTask(args) {
   if (due !== undefined) updateData.due = due;
   if (completed_at !== undefined) updateData.completed_at = completed_at;
 
-  const result = await feishuRequest(
-    "PATCH",
-    `/open-apis/task/v2/task/${task_guid}`,
-    { data: updateData }
-  );
+  try {
+    const token = await getTenantAccessToken();
 
-  return {
-    content: [
-      {
-        type: "text",
-        text: `任务更新成功！\nGUID: ${task_guid}`,
+    const response = await axios({
+      method: "PATCH",
+      url: `${config.larkDomain}/open-apis/task/v1/tasks/${task_guid}`,
+      data: { data: updateData },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
       },
-    ],
-  };
+    });
+
+    if (response.data.code !== 0) {
+      throw new Error(response.data.msg || `Error code: ${response.data.code}`);
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `✅ 任务更新成功！\n任务ID: ${task_guid}`,
+        },
+      ],
+    };
+  } catch (error) {
+    console.error("[Update Task Error]:", error.message);
+    if (error.response) {
+      console.error("Status:", error.response.status);
+      console.error("Data:", JSON.stringify(error.response.data, null, 2));
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text: `❌ 更新任务失败: ${error.message}`,
+        },
+      ],
+      isError: true,
+    };
+  }
 }
 
 // 删除任务
 export async function deleteTask(args) {
   const { task_guid } = args;
 
-  await feishuRequest("DELETE", `/open-apis/task/v2/task/${task_guid}`);
+  try {
+    const token = await getTenantAccessToken();
 
-  return {
-    content: [
-      {
-        type: "text",
-        text: `任务删除成功！\nGUID: ${task_guid}`,
+    const response = await axios({
+      method: "DELETE",
+      url: `${config.larkDomain}/open-apis/task/v1/tasks/${task_guid}`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
       },
-    ],
-  };
+    });
+
+    if (response.data.code !== 0) {
+      throw new Error(response.data.msg || `Error code: ${response.data.code}`);
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `✅ 任务删除成功！\n任务ID: ${task_guid}`,
+        },
+      ],
+    };
+  } catch (error) {
+    console.error("[Delete Task Error]:", error.message);
+    if (error.response) {
+      console.error("Status:", error.response.status);
+      console.error("Data:", JSON.stringify(error.response.data, null, 2));
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text: `❌ 删除任务失败: ${error.message}`,
+        },
+      ],
+      isError: true,
+    };
+  }
 }
